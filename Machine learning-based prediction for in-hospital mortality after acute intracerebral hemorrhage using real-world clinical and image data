@@ -1,0 +1,237 @@
+library(dplyr)
+library(pROC)
+library(CalibrationCurves)
+library(PRROC)
+library(glmnet)
+
+#--------------------------------------#
+# Image model             　　　       #
+#--------------------------------------#
+model1=read.csv()
+シグモイド補正
+set.seed(1)
+model <- glm(label ~ prob, data = model1, family = "binomial")
+model1$calibrated_p <- predict(model, newdata = model1, type = "response")
+stats2=val.prob.ci.2(p=roc(model1$label,model1$calibrated_p)$predictor,y=roc(model1$label,model1$calibrated_p)$response,g=10,CL.BT=T,ylim = c(0,1),xlim = c(0,1),smooth = c("none"),)
+
+calibration=data.frame(stats2$Calibration)
+AUC=data.frame(stats2$Cindex)
+
+#AUPRC
+AUPRC<-pr.curve(scores.class0 = model1$calibrated_p, weights.class0 = model1$label, curve = TRUE)$auc.integral
+set.seed(201)
+AUPRC=vector(length = 2000)
+for(i in 1:2000)
+{
+  print(i)
+  set.seed(i)
+  ind=sample(nrow(model1),nrow(model1),replace=T)
+  val=model1[ind,]
+  AUPRC[i]<-pr.curve(scores.class0 = val$calibrated_p, weights.class0 = val$label, curve = TRUE)$auc.integral
+}
+
+AUPRC_lower<-quantile(AUPRC,0.025)
+AUPRC_upper<-quantile(AUPRC,0.975)
+
+#感度特異度
+p<-data.frame(p=roc(model1$label,model1$calibrated_p)$predictor,y=roc(model1$label,model1$calibrated_p)$response)
+set.seed(201)
+cutoff1<-coords(roc(p$y,p$p), x="best", ret="all", best.method="youden")
+cutoff2<-ci.coords(roc(p$y,p$p), x="best", ret="all", best.method="youden")
+
+#Sensitivity
+cutoff1$sensitivity
+cutoff2$sensitivity
+
+#specificity
+cutoff1$specificity
+cutoff2$specificity
+
+#ppv
+cutoff1$ppv
+cutoff2$ppv
+
+#npv
+cutoff1$npv
+cutoff2$npv
+
+#--------------------------------------#
+# L2model                    　　　    #
+#--------------------------------------#
+x=read.csv()
+#x=x %>% select(-pid,-hospitalization_date,-preadmissionmRS,-GlasgowComaScore,-absenceofIVH,
+               -location_putamen,-location_thalamus,-location_subcortex,
+               -location_brainstemandpons,-location_cerebellum,-location_other,-takingdirectoralanticoagulants,
+               -takingwarfarin,-diabetesmellitus,-dyslipidemia,-hypertension,-historyofhemorrhage,
+               -smoking,-drinking,-baselinehematomavolumemL)
+
+#split derivation cohort and validation cohort
+train=x %>% filter(train_or_valid=="train"|train_or_valid=="valid") %>% select(-train_or_valid)
+test=x %>% filter(train_or_valid=="test") %>% select(-train_or_valid)
+
+#training
+set.seed(1)
+x <- model.matrix(obj~.,train) 
+y <- train$obj
+num_positive <- sum(train$obj == 1)
+num_negative <- sum(train$obj == 0)
+sample_weights <- ifelse(train$obj == 1, num_negative/num_positive, 1)
+cvfit <- cv.glmnet(x=x, y=y,alpha=1, family="binomial",nfolds = 10, standardize=F,weights=sample_weights)
+train.LASSO <-glmnet(x=x, y=y,alpha=1, family="binomial", lambda = cvfit$lambda.min, standardize=F,weights=sample_weights)
+
+#display standardized regression coefficients
+beta<-data.matrix(train.LASSO$beta)
+write.csv(beta,"C:/Users/OWNER/beta.csv",fileEncoding='cp932')
+
+#test
+set.seed(2)
+x2 <- model.matrix(obj~.,test)　
+test.LASSO <- predict(train.LASSO, newx=x2,type="response")
+test.LASSO <- as.vector(test.LASSO)
+stats2=val.prob.ci.2(p=roc(test$obj,test.LASSO)$predictor,y=roc(test$obj,test.LASSO)$response,g=10,CL.BT=F)
+
+#シグモイド補正
+test$p<-test.LASSO
+set.seed(1)
+model <- glm(obj ~ p, data = test, family = "binomial")
+test$calibrated_p <- predict(model, newdata = test, type = "response")
+stats2=val.prob.ci.2(p=roc(test$obj,test$calibrated_p)$predictor,y=roc(test$obj,test$calibrated_p)$response,g=10,CL.BT=T,ylim = c(0,1),xlim = c(0,1),smooth = c("none"),)
+calibration=data.frame(stats2$Calibration)
+AUC=data.frame(stats2$Cindex)
+
+#AUPRC
+AUPRC<-pr.curve(scores.class0 = test$calibrated_p, weights.class0 = test$obj, curve = TRUE)$auc.integral
+set.seed(201)
+AUPRC=vector(length = 2000)
+for(i in 1:2000)
+{
+  print(i)
+  set.seed(i)
+  ind=sample(nrow(test),nrow(test),replace=T)
+  val=test[ind,]
+  AUPRC[i]<-pr.curve(scores.class0 = val$calibrated_p, weights.class0 = val$obj, curve = TRUE)$auc.integral
+}
+
+AUPRC_lower<-quantile(AUPRC,0.025)
+AUPRC_upper<-quantile(AUPRC,0.975)
+
+#感度特異度
+p<-data.frame(p=roc(test$obj,test$calibrated_p)$predictor,y=roc(test$obj,test$calibrated_p)$response)
+set.seed(201)
+cutoff1<-coords(roc(p$y,p$p), x="best", ret="all", best.method="youden")
+cutoff2<-ci.coords(roc(p$y,p$p), x="best", ret="all", best.method="youden")
+
+#Sensitivity
+cutoff1$sensitivity
+cutoff2$sensitivity
+
+#specificity
+cutoff1$specificity
+cutoff2$specificity
+
+#ppv
+cutoff1$ppv
+cutoff2$ppv
+
+#npv
+cutoff1$npv
+cutoff2$npv
+
+#--------------------------------------#
+# score                   　　         #
+#--------------------------------------#
+x=read.csv()
+x$obj <- x$discharge.mRS==6
+
+#split derivation cohort and validation cohort
+train=x %>% filter(train_or_valid=="train"|train_or_valid=="valid") %>% select(-train_or_valid)
+test=x %>% filter(train_or_valid=="test") %>% select(-train_or_valid)
+
+#AUROC
+ROC<-roc(test$obj, test$ICH.GS)
+set.seed(201)
+ci.auc(ROC, of="auc", method="boot") 
+
+#AUPRC
+AUPRC<-pr.curve(scores.class0 = test$ICH.GS, weights.class0 = test$obj, curve = TRUE)$auc.integral
+#AUPRC 95%CI
+set.seed(201)
+AUPRC=vector(length = 2000)
+for(i in 1:2000)
+{
+  print(i)
+  set.seed(i)
+  ind=sample(nrow(test),nrow(test),replace=T)
+  val=test[ind,]
+  AUPRC[i]<-pr.curve(scores.class0 = val$ICH.GS
+                     , weights.class0 = val$obj, curve = TRUE)$auc.integral
+}
+
+AUPRC_lower<-quantile(AUPRC,0.025)
+AUPRC_upper<-quantile(AUPRC,0.975)
+
+#感度・特異度
+set.seed(201)
+cutoff1<-coords(roc(test$obj,test$ICH.GS), x="best", ret="all", best.method="youden")
+cutoff2<-ci.coords(roc(test$obj,test$ICH.GS), x="best", ret="all", best.method="youden")
+
+#Sensitivity
+cutoff1$sensitivity
+cutoff2$sensitivity
+
+#specificity
+cutoff1$specificity
+cutoff2$specificity
+
+#ppv
+cutoff1$ppv
+cutoff2$ppv
+
+#npv
+cutoff1$npv
+cutoff2$npv
+
+#--------------------------------------#
+# DCA(Decision Curve analysis)         #
+#--------------------------------------#
+library(rmda)
+
+test2<-test
+test3<-test
+
+#DCA curve(For patients with a positive decision based on a predictive model)
+#net benefit(NB)=true positive/n　-　false positive/n × p/(1-p) ※p=Cutoff value of predicted probability
+dca_option1<-decision_curve(label~calibrated_p,data=model1,policy="opt-in",fitted.risk=TRUE,thresholds=seq(0,0.8,by=0.1))
+dca_option2<-decision_curve(obj~calibrated_p,data=test2,policy="opt-in",fitted.risk=TRUE,thresholds=seq(0,0.8,by=0.1))
+dca_option3<-decision_curve(obj~calibrated_p,data=test3,policy="opt-in",fitted.risk=TRUE,thresholds=seq(0,0.8,by=0.1))
+
+#DCA display
+plot_decision_curve(list(dca_option1,dca_option2,dca_option3),curve.names=c("Image model","Non-expert model","Expert model"),
+                    col = c("blue","green","red"),legend.position = "none",
+                    confidence.intervals = F,standardize = F,ylim=c(0,0.15), xlab="Risk threshold",
+                    cost.benefit.axis=F,par(family="Arial"),lwd = c(2,2,2,2,2),lty=c(3,3,3))
+
+
+#--------------------------------------#
+# カプランマイヤー曲線                 #
+#--------------------------------------#
+df=read.csv()
+library(survival)
+
+fit <- survfit(Surv(time, status) ~ Expert.interpreted.model, data = df)
+
+# プロット
+plot(fit, col = c("black","blue","red"),lwd = c(2,2,2),lty=c(1,1,1),xlab="Days after admission",ylab="Survival rate") 
+legend("bottomright",legend = c("Group 1-8", "Group 9","Group 10"), 
+            col = c("black","blue","red"), 
+            lwd = c(2, 2,2))
+# プロット2
+plot(fit, col = c("black","blue","red"),lwd = c(2,2,2),lty=c(1,1,1)) 
+legend("bottomright",
+       col = c("black","blue","red"), 
+       lwd = c(2, 2,2))
+
+#ログランク
+surv_obj <- Surv(df$time, df$status)
+logrank_test <- survdiff(surv_obj ~ df$Expert.interpreted.model)
+
